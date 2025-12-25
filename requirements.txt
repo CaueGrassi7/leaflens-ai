@@ -1,0 +1,13 @@
+# Backend
+fastapi
+uvicorn
+python-multipart
+pillow
+
+# ML & Data
+numpy
+pandas
+scikit-learn
+tensorflow  # ou torch, dependendo da sua escolha
+matplotlib
+jupyter
