@@ -59,3 +59,4 @@ pip install -r requirements.txt
 
 O servidor roda em `http://localhost:8000` por padrão.
 
+
