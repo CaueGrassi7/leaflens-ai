@@ -1,25 +1,57 @@
-import os
-import json
-import argparse
-import tensorflow as tf
-from tensorflow.keras import layers, models
-from pathlib import Path
-import matplotlib.pyplot as plt
+"""
+Training script for the LeafLens AI plant disease detection model.
 
-# --- CONFIGURAÇÕES ---
+This script trains a universal MobileNetV2-based model that can detect
+diseases across multiple plant species. It dynamically loads all available
+classes from the training data directory and saves both the model and
+class mappings for use by the backend API.
+"""
+import argparse
+import json
+from pathlib import Path
+from typing import List, Tuple
+
+import tensorflow as tf
+from tensorflow.keras import layers
+
+# --- CONFIGURATION ---
 IMG_SIZE = 256
 BATCH_SIZE = 32
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / 'ml' / 'data' / 'raw'
 MODELS_DIR = PROJECT_ROOT / 'ml' / 'models'
 
-def load_data():
-    print(f"📂 Carregando TODAS as culturas de: {DATA_DIR}")
-    
+
+def load_data() -> Tuple[tf.data.Dataset, tf.data.Dataset, List[str]]:
+    """
+    Load training and validation datasets from the data directory.
+
+    Dynamically discovers all plant disease classes from subdirectories
+    in the training data folder. Applies data augmentation and optimization
+    for efficient training.
+
+    Returns:
+        Tuple containing:
+            - Training dataset (tf.data.Dataset)
+            - Validation dataset (tf.data.Dataset)
+            - List of class names (List[str])
+
+    Raises:
+        FileNotFoundError: If the data directory or required subdirectories
+            do not exist.
+        ValueError: If no classes are found in the training directory.
+    """
+    print(f"📂 Loading all plant cultures from: {DATA_DIR}")
+
     train_dir = DATA_DIR / 'train'
     val_dir = DATA_DIR / 'val'
 
-    # Carrega dataset dinamicamente (lê todas as pastas que encontrar)
+    if not train_dir.exists():
+        raise FileNotFoundError(f"Training directory not found: {train_dir}")
+    if not val_dir.exists():
+        raise FileNotFoundError(f"Validation directory not found: {val_dir}")
+
+    # Load dataset dynamically (reads all folders found)
     train_ds = tf.keras.utils.image_dataset_from_directory(
         train_dir,
         shuffle=True,
@@ -35,8 +67,11 @@ def load_data():
     )
 
     class_names = train_ds.class_names
-    print(f"✅ Total de Classes Detectadas: {len(class_names)}")
-    print(f"📋 Exemplo: {class_names[:5]}...") # Mostra as 5 primeiras para conferir
+    if not class_names:
+        raise ValueError("No classes found in training directory")
+
+    print(f"✅ Total Classes Detected: {len(class_names)}")
+    print(f"📋 Example: {class_names[:5]}...")  # Show first 5 for verification
 
     AUTOTUNE = tf.data.AUTOTUNE
     train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
@@ -44,9 +79,22 @@ def load_data():
 
     return train_ds, val_ds, class_names
 
-def build_model(num_classes):
-    print(f"🏗️ Adaptando MobileNetV2 para {num_classes} classes...")
-    
+
+def build_model(num_classes: int) -> tf.keras.Model:
+    """
+    Build a MobileNetV2-based model for plant disease classification.
+
+    Uses transfer learning with MobileNetV2 as the base model, adding
+    data augmentation layers and a custom classification head.
+
+    Args:
+        num_classes: Number of output classes for the classification task.
+
+    Returns:
+        Compiled Keras model ready for training.
+    """
+    print(f"🏗️ Adapting MobileNetV2 for {num_classes} classes...")
+
     data_augmentation = tf.keras.Sequential([
         layers.RandomFlip("horizontal_and_vertical"),
         layers.RandomRotation(0.2),
@@ -68,47 +116,97 @@ def build_model(num_classes):
     outputs = layers.Dense(num_classes, activation='softmax')(x)
 
     model = tf.keras.Model(inputs, outputs)
-    
+
     model.compile(
         optimizer='adam',
         loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
-    
+
     return model
 
-def save_artifacts(model, class_names, version):
+
+def save_artifacts(
+    model: tf.keras.Model,
+    class_names: List[str],
+    version: str
+) -> None:
+    """
+    Save the trained model and class mappings to disk.
+
+    Saves both the Keras model file and a JSON file containing the
+    class names. This is crucial for the backend to dynamically load
+    the correct classes for the universal model.
+
+    Args:
+        model: Trained Keras model to save.
+        class_names: List of class names corresponding to model outputs.
+        version: Version identifier for the model (e.g., "universal_v1").
+
+    Raises:
+        OSError: If the models directory cannot be created or files
+            cannot be written.
+    """
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # 1. Salvar Modelo
+
+    # 1. Save Model
     model_path = MODELS_DIR / f"plant_disease_model_v{version}.keras"
-    model.save(model_path)
-    print(f"💾 Modelo salvo: {model_path}")
+    try:
+        model.save(model_path)
+        print(f"💾 Model saved: {model_path}")
+    except Exception as e:
+        raise OSError(f"Failed to save model to {model_path}: {e}")
 
-    # 2. SALVAR AS CLASSES (Crucial para o Backend Universal)
+    # 2. Save Classes (Critical for Universal Backend)
     classes_path = MODELS_DIR / f"classes_v{version}.json"
-    with open(classes_path, 'w') as f:
-        json.dump(class_names, f)
-    print(f"📝 Classes salvas: {classes_path}")
+    try:
+        with open(classes_path, 'w') as f:
+            json.dump(class_names, f)
+        print(f"📝 Classes saved: {classes_path}")
+    except Exception as e:
+        raise OSError(f"Failed to save classes to {classes_path}: {e}")
 
-def main(epochs, version):
+
+def main(epochs: int, version: str) -> None:
+    """
+    Main training function that orchestrates the entire training process.
+
+    Loads data, builds the model, trains it, and saves all artifacts.
+
+    Args:
+        epochs: Number of training epochs.
+        version: Version identifier for the model (e.g., "universal_v1").
+    """
     train_ds, val_ds, class_names = load_data()
     model = build_model(len(class_names))
-    
-    print(f"🏋️ Treinando modelo 'Generalista' por {epochs} épocas...")
+
+    print(f"🏋️ Training 'Universal' model for {epochs} epochs...")
     history = model.fit(
         train_ds,
         epochs=epochs,
         validation_data=val_ds,
         verbose=1
     )
-    
+
     save_artifacts(model, class_names, version)
-    print("✨ Treinamento Completo!")
+    print("✨ Training Complete!")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--version", type=str, default="universal_v1")
+    parser = argparse.ArgumentParser(
+        description="Train a universal plant disease detection model"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=15,
+        help="Number of training epochs (default: 15)"
+    )
+    parser.add_argument(
+        "--version",
+        type=str,
+        default="universal_v1",
+        help="Model version identifier (default: universal_v1)"
+    )
     args = parser.parse_args()
     main(args.epochs, args.version)

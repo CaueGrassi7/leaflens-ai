@@ -5,9 +5,10 @@ python-multipart
 pillow
 
 # ML & Data
-numpy
+numpy<2.0.0,>=1.24.0  # TensorFlow 2.18 requires numpy<2.0.0 for compatibility
 pandas
 scikit-learn
-tensorflow  # ou torch, dependendo da sua escolha
+tensorflow>=2.18.0,<2.19.0  # TensorFlow 2.18.x with full Keras 3.x support
+keras>=3.3.0,<4.0.0  # Keras 3.3+ required for quantization_config support
 matplotlib
 jupyter

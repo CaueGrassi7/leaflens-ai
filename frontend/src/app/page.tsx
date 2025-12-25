@@ -2,11 +2,13 @@
 
 import { useState, useCallback, useRef } from 'react'
 import axios from 'axios'
-import { Upload, Loader2, CheckCircle, AlertCircle, Image as ImageIcon } from 'lucide-react'
+import { Upload, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 
 interface PredictionResult {
   class: string
   confidence: number
+  low_confidence?: boolean
+  message?: string
 }
 
 export default function Home() {
@@ -32,6 +34,44 @@ export default function Home() {
     return formatted
   }
 
+  // Submit file to API
+  const handleSubmit = useCallback(async (file: File) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await axios.post<PredictionResult>(
+        `${apiUrl}/predict`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      )
+
+      setResult(response.data)
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        if (err.response) {
+          setError(err.response.data?.detail || 'Failed to process image')
+        } else if (err.request) {
+          setError('Unable to connect to the server. Please make sure the backend is running.')
+        } else {
+          setError('An error occurred while processing your request')
+        }
+      } else {
+        setError('An unexpected error occurred')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   // Handle file selection
   const handleFileSelect = useCallback((file: File) => {
     // Validate file type
@@ -50,7 +90,7 @@ export default function Home() {
 
     // Automatically submit to API
     handleSubmit(file)
-  }, [])
+  }, [handleSubmit])
 
   // Handle drag and drop
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -83,43 +123,6 @@ export default function Home() {
       handleFileSelect(files[0])
     }
   }, [handleFileSelect])
-
-  // Submit file to API
-  const handleSubmit = async (file: File) => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await axios.post<PredictionResult>(
-        'http://localhost:8000/predict',
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      )
-
-      setResult(response.data)
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        if (err.response) {
-          setError(err.response.data?.detail || 'Failed to process image')
-        } else if (err.request) {
-          setError('Unable to connect to the server. Please make sure the backend is running.')
-        } else {
-          setError('An error occurred while processing your request')
-        }
-      } else {
-        setError('An unexpected error occurred')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
 
   // Reset state
   const handleReset = () => {
@@ -238,16 +241,31 @@ export default function Home() {
         {result && !loading && (
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 md:p-8 shadow-lg">
             <div className="flex items-start gap-3 mb-6">
-              <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+              {result.low_confidence ? (
+                <AlertCircle className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+              ) : (
+                <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+              )}
               <div className="flex-1">
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
                   Detection Result
                 </h2>
+                {result.low_confidence && result.message && (
+                  <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                      {result.message}
+                    </p>
+                  </div>
+                )}
                 <div className="mb-4">
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
                     Disease Name
                   </p>
-                  <p className="text-xl font-semibold text-emerald-700 dark:text-emerald-400">
+                  <p className={`text-xl font-semibold ${
+                    result.low_confidence
+                      ? 'text-yellow-700 dark:text-yellow-400'
+                      : 'text-emerald-700 dark:text-emerald-400'
+                  }`}>
                     {formatDiseaseName(result.class)}
                   </p>
                 </div>
@@ -262,7 +280,11 @@ export default function Home() {
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all duration-500 ease-out"
+                      className={`h-full transition-all duration-500 ease-out ${
+                        result.low_confidence
+                          ? 'bg-gradient-to-r from-yellow-500 to-yellow-600'
+                          : 'bg-gradient-to-r from-emerald-500 to-emerald-600'
+                      }`}
                       style={{ width: `${result.confidence * 100}%` }}
                     />
                   </div>
